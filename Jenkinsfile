@@ -56,7 +56,7 @@ pipeline {
                     
                     for (int i = 1; i <= maxRetries; i++) {
                         echo "Attempt ${i}/${maxRetries} to curl healthcheck endpoint..."
-                        def status = sh(script: "curl -sf http://localhost:${HOST_PORT}/api/health", returnStatus: true)
+                        def status = sh(script: "docker exec ${APP_NAME} curl -sf http://localhost:${CONTAINER_PORT}/api/health", returnStatus: true)
                         if (status == 0) {
                             success = true
                             echo "✅ Application ${APP_NAME} successfully deployed and running on port ${HOST_PORT}!"
