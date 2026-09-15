@@ -1,0 +1,16 @@
+services:
+  doc2vector:
+    build: .
+    image: doc2vector:latest
+    container_name: doc2vector
+    restart: always
+    ports:
+      - "3017:8000"
+    env_file:
+      - .env
+    networks:
+      - qdrant-net
+
+networks:
+  qdrant-net:
+    external: true

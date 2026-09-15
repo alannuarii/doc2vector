@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>doc2vector — Document Ingestion Pipeline</title>
+  <meta name="description" content="Proses dokumen teknis ke vector embedding untuk RAG knowledge base." />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            surface: {
+              DEFAULT: '#0f0f17',
+              50: '#f5f5ff',
+              100: '#e8e8f0',
+              800: '#16162a',
+              900: '#0f0f17',
+              950: '#0a0a11',
+            },
+            accent: {
+              DEFAULT: '#7c5cfc',
+              light: '#a78bfa',
+              dark: '#5b3fd4',
+            },
+          },
+          animation: {
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'slide-up': 'slideUp 0.3s ease-out',
+            'fade-in': 'fadeIn 0.4s ease-out',
+          },
+          keyframes: {
+            slideUp: {
+              '0%': { opacity: '0', transform: 'translateY(10px)' },
+              '100%': { opacity: '1', transform: 'translateY(0)' },
+            },
+            fadeIn: {
+              '0%': { opacity: '0' },
+              '100%': { opacity: '1' },
+            },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    * { scrollbar-width: thin; scrollbar-color: #3b3b5c #16162a; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #16162a; }
+    ::-webkit-scrollbar-thumb { background: #3b3b5c; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #5b5b8c; }
+
+    .drop-zone.drag-over {
+      border-color: #7c5cfc !important;
+      background: rgba(124, 92, 252, 0.08) !important;
+    }
+    .drop-zone.drag-over .drop-icon {
+      transform: scale(1.15);
+    }
+    .drop-zone.has-file {
+      border-color: #34d399 !important;
+      background: rgba(52, 211, 153, 0.05) !important;
+    }
+
+    .log-entry { animation: slideUp 0.25s ease-out; }
+    .glass { backdrop-filter: blur(16px); background: rgba(22, 22, 42, 0.7); }
+
+    @keyframes progressPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .progress-active .progress-bar-inner {
+      animation: progressPulse 1.5s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-surface-900 text-gray-200 font-sans min-h-screen antialiased">
+
+  <!-- ═══ Header ═══ -->
+  <header class="border-b border-white/5 glass sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-purple-500 flex items-center justify-center shadow-lg shadow-accent/20">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">doc2vector</h1>
+        <p class="text-xs text-gray-500">Document Ingestion Pipeline</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <span id="statusBadge" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-slow"></span>
+          Ready
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="max-w-6xl mx-auto px-6 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+
+      <!-- ─── Left Column: Form ─── -->
+      <div class="lg:col-span-2 space-y-6">
+
+        <!-- Collection Name -->
+        <div class="space-y-4 p-6 rounded-2xl border border-white/5 bg-surface-800/50">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <svg class="w-4 h-4 text-accent-light" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6M12 9v6"/></svg>
+            Konfigurasi
+          </h2>
+
+          <div>
+            <label for="collectionName" class="block text-xs font-medium text-gray-400 mb-1.5">Collection Name <span class="text-red-400">*</span></label>
+            <div class="relative">
+              <input type="text" id="collectionName" placeholder="manual_book_engine"
+                class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all" />
+              <div id="collectionSuggestions" class="absolute top-full left-0 right-0 mt-1 z-10 hidden"></div>
+            </div>
+          </div>
+
+          <div>
+            <label for="documentTitle" class="block text-xs font-medium text-gray-400 mb-1.5">Document Title <span class="text-red-400">*</span></label>
+            <input type="text" id="documentTitle" placeholder="Manual Book Mitsubishi S16R"
+              class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all" />
+          </div>
+
+          <div>
+            <label for="category" class="block text-xs font-medium text-gray-400 mb-1.5">Category <span class="text-gray-600">(opsional)</span></label>
+            <input type="text" id="category" placeholder="Mitsubishi S16R"
+              class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all" />
+          </div>
+
+          <!-- Advanced Settings Toggle -->
+          <button type="button" id="advancedToggle" class="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            <svg id="advancedArrow" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            Advanced Settings
+          </button>
+
+          <div id="advancedPanel" class="hidden space-y-4 pt-2 border-t border-white/5">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label for="chunkSize" class="block text-xs font-medium text-gray-400 mb-1.5">Chunk Size</label>
+                <input type="number" id="chunkSize" value="1500" min="200" max="8000"
+                  class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all" />
+              </div>
+              <div>
+                <label for="chunkOverlap" class="block text-xs font-medium text-gray-400 mb-1.5">Chunk Overlap</label>
+                <input type="number" id="chunkOverlap" value="250" min="0" max="2000"
+                  class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all" />
+              </div>
+            </div>
+            <div>
+              <label for="customMetadata" class="block text-xs font-medium text-gray-400 mb-1.5">Custom Metadata <span class="text-gray-600">(JSON)</span></label>
+              <textarea id="customMetadata" rows="2" placeholder='{"unit": "PLTD-01", "revision": "3"}'
+                class="w-full px-4 py-2.5 text-sm bg-surface-900 border border-white/10 rounded-xl text-white placeholder-gray-600 font-mono focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all resize-none"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- File Upload -->
+        <div class="p-6 rounded-2xl border border-white/5 bg-surface-800/50">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <svg class="w-4 h-4 text-accent-light" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Upload Dokumen
+          </h2>
+
+          <div id="dropZone" class="drop-zone relative border-2 border-dashed border-white/10 rounded-2xl p-8 text-center cursor-pointer hover:border-accent/30 transition-all duration-300 group">
+            <input type="file" id="fileInput" accept=".pdf,.md,.markdown,.txt" class="hidden" />
+            <div class="drop-icon transition-transform duration-300">
+              <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-accent/10 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
+                <svg class="w-8 h-8 text-accent-light" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+              </div>
+            </div>
+            <p id="dropText" class="text-sm text-gray-400">
+              <span class="text-accent-light font-medium">Klik untuk pilih</span> atau drag & drop file
+            </p>
+            <p class="text-xs text-gray-600 mt-2">.pdf, .md, .markdown, .txt — maks. 50 MB</p>
+          </div>
+
+          <!-- File Info -->
+          <div id="fileInfo" class="hidden mt-4 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p id="fileName" class="text-sm font-medium text-white truncate"></p>
+                <p id="fileSize" class="text-xs text-gray-500"></p>
+              </div>
+              <button id="removeFile" class="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-red-400 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button id="submitBtn" disabled
+          class="w-full py-3.5 rounded-2xl text-sm font-semibold text-white bg-gradient-to-r from-accent to-purple-500 shadow-lg shadow-accent/20 hover:shadow-accent/30 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition-all duration-300 flex items-center justify-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3l14 9-14 9V3z"/></svg>
+          <span id="submitText">Start Ingestion</span>
+        </button>
+      </div>
+
+      <!-- ─── Right Column: Logs ─── -->
+      <div class="lg:col-span-3 space-y-4">
+
+        <!-- Progress Bar -->
+        <div id="progressContainer" class="hidden rounded-2xl border border-white/5 bg-surface-800/50 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+              <span id="progressIcon" class="inline-flex items-center">
+                <svg class="w-4 h-4 text-accent-light" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </span>
+              Progress
+            </h2>
+            <span id="progressPercent" class="text-sm font-mono font-bold text-accent-light">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-surface-900 rounded-full overflow-hidden">
+            <div id="progressBar" class="progress-bar-inner h-full bg-gradient-to-r from-accent to-purple-400 rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Log Console -->
+        <div class="rounded-2xl border border-white/5 bg-surface-800/50 flex flex-col" style="min-height: 520px">
+          <div class="flex items-center justify-between px-5 py-3 border-b border-white/5">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+              <svg class="w-4 h-4 text-accent-light" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              Log Console
+            </h2>
+            <button id="clearLogs" class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-300 rounded-lg hover:bg-white/5 transition-colors">
+              Clear
+            </button>
+          </div>
+          <div id="logPanel" class="flex-1 overflow-y-auto px-5 py-4 space-y-1.5 font-mono text-xs leading-relaxed">
+            <div class="text-gray-600 italic">Menunggu proses ingestion...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══ Footer ═══ -->
+  <footer class="border-t border-white/5 mt-12">
+    <div class="max-w-6xl mx-auto px-6 py-4 text-center text-xs text-gray-600">
+      doc2vector v1.0 — PLTD Tahuna Knowledge Base Pipeline
+    </div>
+  </footer>
+
+  <!-- ═══ JavaScript ═══ -->
+  <script>
+    // ── DOM Elements ──
+    const $ = (sel) => document.querySelector(sel);
+    const collectionName = $('#collectionName');
+    const documentTitle  = $('#documentTitle');
+    const category       = $('#category');
+    const chunkSize      = $('#chunkSize');
+    const chunkOverlap   = $('#chunkOverlap');
+    const customMetadata = $('#customMetadata');
+    const dropZone       = $('#dropZone');
+    const fileInput      = $('#fileInput');
+    const fileInfo       = $('#fileInfo');
+    const fileName       = $('#fileName');
+    const fileSize       = $('#fileSize');
+    const removeFile     = $('#removeFile');
+    const submitBtn      = $('#submitBtn');
+    const submitText     = $('#submitText');
+    const statusBadge    = $('#statusBadge');
+    const progressContainer = $('#progressContainer');
+    const progressBar    = $('#progressBar');
+    const progressPercent = $('#progressPercent');
+    const progressIcon   = $('#progressIcon');
+    const logPanel       = $('#logPanel');
+    const clearLogs      = $('#clearLogs');
+    const advancedToggle = $('#advancedToggle');
+    const advancedPanel  = $('#advancedPanel');
+    const advancedArrow  = $('#advancedArrow');
+    const collectionSuggestions = $('#collectionSuggestions');
+
+    let selectedFile = null;
+    let isProcessing = false;
+
+    // ── Advanced Toggle ──
+    advancedToggle.addEventListener('click', () => {
+      const isHidden = advancedPanel.classList.contains('hidden');
+      advancedPanel.classList.toggle('hidden');
+      advancedArrow.style.transform = isHidden ? 'rotate(90deg)' : '';
+    });
+
+    // ── Collection Autocomplete ──
+    async function loadCollections() {
+      try {
+        const res = await fetch('/api/collections');
+        const data = await res.json();
+        return data.collections || [];
+      } catch { return []; }
+    }
+
+    collectionName.addEventListener('focus', async () => {
+      const collections = await loadCollections();
+      if (collections.length === 0) return;
+
+      collectionSuggestions.innerHTML = collections.map(c =>
+        `<button type="button" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-accent/10 hover:text-white transition-colors first:rounded-t-xl last:rounded-b-xl">${c}</button>`
+      ).join('');
+      collectionSuggestions.className = 'absolute top-full left-0 right-0 mt-1 z-10 bg-surface-900 border border-white/10 rounded-xl overflow-hidden shadow-2xl max-h-48 overflow-y-auto';
+
+      collectionSuggestions.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          collectionName.value = btn.textContent;
+          collectionSuggestions.classList.add('hidden');
+          validateForm();
+        });
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!collectionSuggestions.contains(e.target) && e.target !== collectionName) {
+        collectionSuggestions.classList.add('hidden');
+      }
+    });
+
+    // ── File Upload ──
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+      });
+    });
+    dropZone.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function handleFile(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      const allowed = ['pdf', 'md', 'markdown', 'txt'];
+      if (!allowed.includes(ext)) {
+        addLog('error', `Format .${ext} tidak didukung. Gunakan: ${allowed.join(', ')}`);
+        return;
+      }
+      if (file.size > 50 * 1024 * 1024) {
+        addLog('error', `File terlalu besar (${(file.size / 1024 / 1024).toFixed(1)} MB). Maks. 50 MB.`);
+        return;
+      }
+      selectedFile = file;
+      fileName.textContent = file.name;
+      fileSize.textContent = formatSize(file.size);
+      fileInfo.classList.remove('hidden');
+      dropZone.classList.add('has-file');
+      validateForm();
+    }
+
+    removeFile.addEventListener('click', () => {
+      selectedFile = null;
+      fileInput.value = '';
+      fileInfo.classList.add('hidden');
+      dropZone.classList.remove('has-file');
+      validateForm();
+    });
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    // ── Form Validation ──
+    function validateForm() {
+      const valid = collectionName.value.trim() && documentTitle.value.trim() && selectedFile && !isProcessing;
+      submitBtn.disabled = !valid;
+    }
+    [collectionName, documentTitle, category].forEach(el =>
+      el.addEventListener('input', validateForm)
+    );
+
+    // ── Log Panel ──
+    function addLog(type, message) {
+      const colors = {
+        info:    'text-gray-400',
+        success: 'text-emerald-400',
+        error:   'text-red-400',
+        warning: 'text-amber-400',
+        progress:'text-blue-400',
+      };
+      const time = new Date().toLocaleTimeString('id-ID', { hour12: false });
+      const div = document.createElement('div');
+      div.className = `log-entry ${colors[type] || 'text-gray-400'}`;
+      div.innerHTML = `<span class="text-gray-600">[${time}]</span> ${escapeHtml(message)}`;
+      logPanel.appendChild(div);
+      logPanel.scrollTop = logPanel.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    clearLogs.addEventListener('click', () => {
+      logPanel.innerHTML = '<div class="text-gray-600 italic">Log dibersihkan.</div>';
+      progressContainer.classList.add('hidden');
+      setProgress(0, 'init');
+      setStatus('ready', 'Ready');
+    });
+
+    // ── Status Badge ──
+    function setStatus(status, text) {
+      const styles = {
+        ready:      'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        processing: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        success:    'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        error:      'bg-red-500/10 text-red-400 border-red-500/20',
+      };
+      const dotColors = {
+        ready: 'bg-emerald-400', processing: 'bg-blue-400',
+        success: 'bg-emerald-400', error: 'bg-red-400',
+      };
+      statusBadge.className = `inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border ${styles[status]}`;
+      statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${dotColors[status]} ${status === 'processing' ? 'animate-pulse' : ''}"></span>${text}`;
+    }
+
+    // ── Progress ──
+    function setProgress(percent, state = 'running') {
+      progressBar.style.width = percent + '%';
+      progressPercent.textContent = percent + '%';
+
+      if (state === 'complete' || percent >= 100) {
+        progressContainer.classList.remove('progress-active');
+        progressPercent.className = 'text-sm font-mono font-bold text-emerald-400';
+        progressIcon.innerHTML = `<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+      } else if (state === 'error') {
+        progressContainer.classList.remove('progress-active');
+        progressPercent.className = 'text-sm font-mono font-bold text-red-400';
+        progressIcon.innerHTML = `<svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`;
+      } else {
+        progressPercent.className = 'text-sm font-mono font-bold text-accent-light';
+        if (percent > 0 && percent < 100) {
+          progressContainer.classList.add('progress-active');
+          progressIcon.innerHTML = `<svg class="w-4 h-4 text-accent-light animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+        } else {
+          progressContainer.classList.remove('progress-active');
+          progressIcon.innerHTML = `<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+        }
+      }
+    }
+
+    // ── Submit / Ingestion ──
+    submitBtn.addEventListener('click', async () => {
+      if (isProcessing || !selectedFile) return;
+      isProcessing = true;
+      validateForm();
+
+      let hadError = false;
+
+      // Reset UI
+      logPanel.innerHTML = '';
+      progressContainer.classList.remove('hidden');
+      setProgress(0, 'running');
+      setStatus('processing', 'Processing...');
+      submitText.textContent = 'Processing...';
+
+      // Build FormData
+      const form = new FormData();
+      form.append('file', selectedFile);
+      form.append('collection_name', collectionName.value.trim());
+      form.append('document_title', documentTitle.value.trim());
+      form.append('category', category.value.trim());
+      form.append('chunk_size', chunkSize.value);
+      form.append('chunk_overlap', chunkOverlap.value);
+      form.append('custom_metadata', customMetadata.value.trim());
+
+      try {
+        const response = await fetch('/api/ingest', {
+          method: 'POST',
+          body: form,
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+
+          for (const eventStr of events) {
+            if (!eventStr.trim()) continue;
+            const lines = eventStr.split('\n');
+            let eventData = '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                eventData += line.slice(6);
+              }
+            }
+            if (!eventData) continue;
+
+            try {
+              const data = JSON.parse(eventData);
+              const type = data.type || 'info';
+
+              // Map event type to log type
+              let logType = 'info';
+              if (type === 'error') logType = 'error';
+              else if (type.includes('done') || type === 'complete' || type.includes('complete')) logType = 'success';
+              else if (type.includes('progress')) logType = 'progress';
+
+              addLog(logType, data.message || JSON.stringify(data));
+
+              // Update progress
+              if (data.progress !== undefined) {
+                setProgress(data.progress, 'running');
+              }
+
+              // Handle completion
+              if (type === 'complete') {
+                setStatus('success', 'Complete');
+                setProgress(100, 'complete');
+                addLog('success', `── Ingestion selesai! Total ${data.total_chunks || '?'} chunks. ──`);
+              }
+
+              // Handle error
+              if (type === 'error') {
+                hadError = true;
+                setStatus('error', 'Failed');
+                setProgress(0, 'error');
+              }
+            } catch (parseErr) {
+              // Non-JSON data, just log it
+              addLog('info', eventData);
+            }
+          }
+        }
+      } catch (err) {
+        hadError = true;
+        addLog('error', `Koneksi gagal: ${err.message}`);
+        setStatus('error', 'Connection Error');
+        setProgress(0, 'error');
+      } finally {
+        isProcessing = false;
+        submitText.textContent = 'Start Ingestion';
+        validateForm();
+
+        // Reset status after 10s only if successful
+        if (!hadError) {
+          setTimeout(() => {
+            if (!isProcessing) {
+              setStatus('ready', 'Ready');
+            }
+          }, 10000);
+        }
+      }
+    });
+
+    // ── Init ──
+    validateForm();
+  </script>
+</body>
+</html>
