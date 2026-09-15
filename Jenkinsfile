@@ -49,9 +49,31 @@ pipeline {
         stage('Health Check') {
             steps {
                 echo "🩺 Verifying application health..."
-                sleep time: 5, unit: 'SECONDS'
-                sh "curl -f http://localhost:${HOST_PORT}/api/health || (echo '❌ Healthcheck failed' && exit 1)"
-                echo "✅ Application ${APP_NAME} successfully deployed and running on port ${HOST_PORT}!"
+                script {
+                    def maxRetries = 6
+                    def retryInterval = 5 // seconds
+                    def success = false
+                    
+                    for (int i = 1; i <= maxRetries; i++) {
+                        echo "Attempt ${i}/${maxRetries} to curl healthcheck endpoint..."
+                        def status = sh(script: "curl -sf http://localhost:${HOST_PORT}/api/health", returnStatus: true)
+                        if (status == 0) {
+                            success = true
+                            echo "✅ Application ${APP_NAME} successfully deployed and running on port ${HOST_PORT}!"
+                            break
+                        }
+                        if (i < maxRetries) {
+                            echo "Waiting ${retryInterval} seconds before next attempt..."
+                            sleep time: retryInterval, unit: 'SECONDS'
+                        }
+                    }
+                    
+                    if (!success) {
+                        echo "❌ Healthcheck failed after ${maxRetries} attempts. Fetching container logs:"
+                        sh "docker logs ${APP_NAME} || true"
+                        error "Application failed to start or pass healthcheck."
+                    }
+                }
             }
         }
     }
